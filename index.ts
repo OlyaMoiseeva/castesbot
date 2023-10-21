@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import { ok } from 'assert'
+import { addHours } from 'date-fns'
 
 const TelegramBot = require('node-telegram-bot-api')
 
@@ -40,7 +41,7 @@ if (isProduction) {
   bot.setWebHook(`${url}/bot${token}`)
 }
 
-import { Chat, User, Character } from "./types"
+import { Chat, User, Character, PropertyEnum } from "./types"
 
 const products: Record<number, any> = {
   1: {
@@ -174,15 +175,15 @@ const keyboards: Record<string, any> = {
       [
         {
           text: 'Пойти на работу',
-          callback_data: 'career&go',
+          callback_data: 'career&goWork',
         }
       ],
-      // [
-      //   {
-      //     text: 'Найти работу',
-      //     callback_data: 'career&work',
-      //   }
-      // ],
+      [
+        {
+          text: 'Вернуться с работы',
+          callback_data: 'career&goHome',
+        }
+      ],
       // [
       //   {
       //     text: 'Карьера',
@@ -224,6 +225,30 @@ const keyboards: Record<string, any> = {
       ]
     ],
     title: 'Вакансии на сегодня',
+  },
+
+  goWork: {
+    keyboard: [
+      [
+        {
+          text: 'Работать рутинно',
+          callback_data: 'goWork&routine',
+        },
+      ],
+      [
+        {
+          text: 'Рисковать',
+          callback_data: 'goWork&risk',
+        },
+      ],
+      [
+        {
+          text: 'Отлынивать от работы',
+          callback_data: 'goWork&lazy',
+        },
+      ]
+    ],
+    title: 'Как ты планируешь сегодня поработать?',
   },
 }
 
@@ -468,6 +493,24 @@ bot.on('message', async (msg: Message) => {
         }
       )
     }
+
+    if (command === 'карьера') {
+      let { keyboard } = getKeyboard('career')
+      // console.log(keyboard)
+
+      keyboard = keyboard.filter(element => user.character.profession.atWork ? element[0].callback_data !== 'career&goWork' : element[0].callback_data !== 'career&goHome')
+
+      bot.sendPhoto(
+        chatId,
+        `./img/${chat.casteCode}/work.jpeg`,
+        {
+          caption : getCareerInfoText(user.character),
+          reply_markup: {
+            inline_keyboard: keyboard
+          }
+        }
+      )
+    }
   }
 
   if (msg?.reply_to_message && userId) {
@@ -507,7 +550,6 @@ bot.on('message', async (msg: Message) => {
 bot.on('callback_query', async (query: Record<string, any>) => {
   const chatId = query?.message?.chat.id
   const userId = query?.from?.id
-  // console.log(query)
 
   const chat = await getChat(chatId)
 
@@ -560,7 +602,8 @@ bot.on('callback_query', async (query: Record<string, any>) => {
 
     if (type === 'menu') {
       if (data === 'career') {
-        const { keyboard } = getKeyboard('career')
+        let { keyboard } = getKeyboard('career')
+        keyboard = keyboard.filter(element => user.character.profession.atWork ? element[0].callback_data !== 'career&goWork' : element[0].callback_data !== 'career&goHome')
 
         bot.sendPhoto(
           chatId,
@@ -572,9 +615,11 @@ bot.on('callback_query', async (query: Record<string, any>) => {
             }
           }
         )
+
+        return
       }
 
-      // если нет data - то само menu
+      // если нет data - то само menu (type = menu)
       const { keyboard, title } = getKeyboard(data || type)
 
       bot.sendMessage(chatId, title, {
@@ -584,14 +629,51 @@ bot.on('callback_query', async (query: Record<string, any>) => {
       })
     }
 
+    if (type === 'goWork') { // ?
+      await updateUser(userId, {
+        'character.profession': {
+          ...user.character.profession,
+          atWork: true,
+          untill: addHours(new Date(), 3)
+        }
+      })
+
+      bot.sendMessage(chatId, 'вернуться можно через 3 часа!')
+    }
+
+    if (type === 'career') {
+      if (data === 'goWork') {
+        const { keyboard, title } = getKeyboard('goWork')
+
+        bot.sendMessage(chatId, title, {
+          reply_markup: {
+            inline_keyboard: keyboard,
+          }
+        })
+      }
+
+      if (data === 'goHome') {
+        await updateUser(userId, {
+          'character.money': user.character.money += user.character.profession.salary,
+          'character.profession': {
+            ...user.character.profession,
+            atWork: false,
+          }
+        })
+
+        bot.sendMessage(chatId, `Вы заработали ${user.character.profession.salary} звериных баллов`)
+      }
+    }
+
     if (type === 'inventory') {
       bot.sendMessage(chatId, '🤡')
     }
 
     if (type === 'work') {
+      // выбор работы
       if (chat?.casteCode) {
         let message
-        if (user?.character?.name !== `Беззаботный ${getCaption(chat.casteCode).nom}`) {
+        if (user?.character?.profession?.name !== `Беззаботный ${getCaption(chat.casteCode).nom}`) {
           message = 'У тебя уже есть работа'
         } else {
           const name = keyboards[type].keyboard.find((el: any) => el[0].callback_data === query.data)[0].text
@@ -611,11 +693,24 @@ bot.on('callback_query', async (query: Record<string, any>) => {
     }
 
     if (type === 'products' && chatId) {
-      const { price, text } = Object.values(products).find(({ callback_data }) => callback_data === query.data)
+      const { price, text, callback_data } = Object.values(products).find(({ callback_data }) => callback_data === query.data)
       if (price > user.character.money) {
         bot.sendMessage(chatId, 'Недостаточно звериных балов(')
       } else {
         bot.sendMessage(chatId, `Вы приобрели ${text}!`)
+
+        const inventory = user.character?.inventory || []
+
+        inventory.push({
+          code: callback_data,
+          title: text,
+          price,
+          type: PropertyEnum.EAT
+        })
+
+        await updateUser(userId, {
+          'character.inventory': inventory
+        })
       }
     }
   }

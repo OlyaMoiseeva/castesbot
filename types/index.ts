@@ -15,6 +15,17 @@ export type User = {
   character?: Character
 }
 
+export enum PropertyEnum {
+  EAT = 'EAT'
+}
+
+export type Property = {
+  code: string
+  title: string
+  type: PropertyEnum
+  price: number
+}
+
 export type Character = {
   name: string
   health: number
@@ -26,5 +37,8 @@ export type Character = {
     name: string
     level: number
     salary: number
+    atWork: boolean
+    untill: Date
   }
+  inventory: Property[]
 }
