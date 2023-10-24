@@ -1,7 +1,3 @@
-// {
-//   "extends": "@tsconfig/recommended/tsconfig.json"
-// }
-
 {
   "swc": true,
   "ts-node": {
